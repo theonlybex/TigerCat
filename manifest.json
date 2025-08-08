@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "TigerCat - Canvas AI Assistant",
+  "version": "1.0.0",
+  "description": "Pacific University branded AI assistant for Canvas LMS",
+  
+  "permissions": [
+    "activeTab",
+    "storage"
+  ],
+  
+  "host_permissions": [
+    "*://*.instructure.com/*"
+  ],
+  
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "TigerCat AI Assistant"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.instructure.com/*"
+      ],
+      "js": [
+        "config.js",
+        "content/canvas-detector.js"
+      ],
+      "css": ["content/tigercat-styles.css"],
+      "run_at": "document_end"
+    }
+  ],
+  
+  "background": {
+    "service_worker": "background/service-worker.js"
+  }
+}

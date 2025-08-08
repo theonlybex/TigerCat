@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TigerCat AI Assistant</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div class="popup-container">
+        <!-- Corner Icons -->
+        <div class="corner-icons">
+            <button id="activate-btn" class="icon-btn" title="Activate on Canvas">🚀</button>
+            <button id="settings-btn" class="icon-btn" title="Canvas API Key">⚙️</button>
+        </div>
+        
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">🐅</div>
+            <h1>TigerCat</h1>
+            <div class="status" id="canvas-status">
+                <span class="status-value" id="status-text">AI Ready</span>
+            </div>
+        </div>
+        
+        <!-- Chat Interface -->
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <div class="message ai-message">
+                    <span class="message-icon">🐅</span>
+                    <div class="message-content">
+                        <p>Hi! I'm TigerCat, your Canvas AI assistant.</p>
+                        <p>Ask me anything about your courses!</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <input type="text" id="chat-input" placeholder="Ask about your courses..." maxlength="500" autocomplete="off">
+                <button id="send-btn" class="send-btn" disabled>
+                    <span class="send-icon">📤</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <div class="footer">
+            <div class="version">TigerCat v1.0</div>
+        </div>
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -37,6 +37,17 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 });
 
+// Handle action button click to open side panel
+chrome.action.onClicked.addListener(async (tab) => {
+    console.log('🐅 Extension icon clicked, opening side panel');
+    try {
+        await chrome.sidePanel.open({ tabId: tab.id });
+        console.log('✅ Side panel opened via icon click');
+    } catch (error) {
+        console.error('❌ Error opening side panel:', error);
+    }
+});
+
 // Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('🐅 Background received message:', request);
@@ -376,14 +387,13 @@ async function handleAutoOpenExtension(tab) {
         
         console.log('🐅 Auto-opening TigerCat for Canvas detection');
         
-        // Try to open the popup programmatically
-        // Note: This will only work if the user has interacted with the page recently
+        // Try to open the side panel programmatically
         try {
-            await chrome.action.openPopup();
-            console.log('✅ TigerCat popup opened automatically');
+            await chrome.sidePanel.open({ tabId: tab.id });
+            console.log('✅ TigerCat side panel opened automatically');
         } catch (error) {
             // Fallback: Show a notification or badge
-            console.log('🐅 Could not auto-open popup (user interaction required):', error.message);
+            console.log('🐅 Could not auto-open side panel:', error.message);
             
             // Set badge to indicate Canvas detection
             chrome.action.setBadgeText({
@@ -434,3 +444,39 @@ chrome.runtime.onSuspend.addListener(() => {
 chrome.runtime.onStartup.addListener(() => {
     console.log('🐅 TigerCat service worker starting up...');
 });
+
+// Handle tab activation (when user switches to a tab)
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+        const tab = await chrome.tabs.get(activeInfo.tabId);
+        
+        // Check if this is a Canvas tab
+        if (tab.url && isCanvasURL(tab.url)) {
+            console.log('🐅 Switched to Canvas tab:', tab.url);
+            
+            // Check if user has auto-open enabled
+            const settings = await chrome.storage.local.get(['settings']);
+            const autoOpenEnabled = settings.settings?.autoOpenOnCanvas !== false; // Default to true
+            
+            if (autoOpenEnabled) {
+                // Small delay to ensure tab is fully loaded
+                setTimeout(async () => {
+                    try {
+                        await chrome.sidePanel.open({ tabId: tab.id });
+                        console.log('✅ TigerCat side panel opened on tab switch');
+                    } catch (error) {
+                        console.log('🐅 Could not auto-open side panel on tab switch:', error.message);
+                    }
+                }, 500);
+            }
+        }
+    } catch (error) {
+        console.log('🐅 Error handling tab activation:', error);
+    }
+});
+
+// Helper function to check if URL is Canvas
+function isCanvasURL(url) {
+    if (!url) return false;
+    return url.includes('instructure.com');
+}

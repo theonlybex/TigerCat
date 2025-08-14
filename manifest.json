@@ -7,7 +7,8 @@
   "permissions": [
     "activeTab",
     "storage",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   
   "host_permissions": [
@@ -15,8 +16,11 @@
   ],
   
   "action": {
-    "default_popup": "popup/popup.html",
     "default_title": "TigerCat AI Assistant"
+  },
+  
+  "side_panel": {
+    "default_path": "popup/popup.html"
   },
   
 

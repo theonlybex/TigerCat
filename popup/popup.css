@@ -17,7 +17,9 @@
 body {
     margin: 0;
     padding: 0;
-    width: 380px;
+    width: 100%;
+    min-width: 300px;
+    max-width: 500px;
     min-height: 500px;
     font-family: 'Georgia', 'Bely Display', serif;
     background: linear-gradient(135deg, var(--pacific-orange-primary) 0%, var(--pacific-orange-secondary) 100%);

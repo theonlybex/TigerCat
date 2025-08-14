@@ -30,7 +30,8 @@ chrome.runtime.onInstalled.addListener((details) => {
             firstTime: true,
             settings: {
                 aiModel: 'gpt-4o-mini',
-                theme: 'auto'
+                theme: 'auto',
+                autoOpenOnCanvas: true  // Enable auto-open by default
             }
         });
     }
@@ -236,8 +237,14 @@ async function handleCanvasDetected(request, sender, sendResponse) {
                 });
                 
                 console.log('🐅 Auto-saved Canvas Base URL:', canvasData.canvasBaseUrl);
+                
+                // Check if we should auto-open the extension
+                await handleAutoOpenExtension(sender.tab);
             } else {
                 console.log('🐅 Canvas URL already configured, not overriding');
+                
+                // Still check for auto-open even if URL wasn't updated
+                await handleAutoOpenExtension(sender.tab);
             }
             
         } catch (error) {
@@ -265,7 +272,8 @@ async function handleGetCanvasConfig(request, sendResponse) {
             success: true,
             config: {
                 baseUrl: stored.canvasBaseUrl || null,
-                apiKey: stored.canvasApiKey || null,
+                apiKey: stored.canvasApiKey ? 'configured' : null, // Don't expose actual key
+                apiKeySet: Boolean(stored.canvasApiKey), // Just indicate if set
                 autoDetected: stored.canvasAutoDetected || false,
                 institutionName: stored.canvasInstitutionName || null,
                 lastDetected: stored.canvasAutoDetectedTime || null
@@ -326,6 +334,78 @@ async function callCanvasAPI(endpoint, apiKey, baseUrl) {
     
     const data = await response.json();
     return data;
+}
+
+/**
+ * Handle auto-opening extension when Canvas is detected
+ */
+async function handleAutoOpenExtension(tab) {
+    if (!tab || !tab.id) return;
+    
+    try {
+        // Check user preferences for auto-open
+        const settings = await chrome.storage.local.get([
+            'settings', 
+            'lastAutoOpenTab', 
+            'lastAutoOpenTime'
+        ]);
+        
+        const autoOpenEnabled = settings.settings?.autoOpenOnCanvas !== false; // Default to true
+        
+        if (!autoOpenEnabled) {
+            console.log('🐅 Auto-open disabled by user');
+            return;
+        }
+        
+        // Prevent opening too frequently (cooldown of 30 seconds per tab)
+        const now = Date.now();
+        const lastOpenTime = settings.lastAutoOpenTime || 0;
+        const lastOpenTab = settings.lastAutoOpenTab;
+        const cooldownMs = 30 * 1000; // 30 seconds
+        
+        if (tab.id === lastOpenTab && (now - lastOpenTime) < cooldownMs) {
+            console.log('🐅 Auto-open cooldown active for this tab');
+            return;
+        }
+        
+        // Record this auto-open attempt
+        await chrome.storage.local.set({
+            lastAutoOpenTab: tab.id,
+            lastAutoOpenTime: now
+        });
+        
+        console.log('🐅 Auto-opening TigerCat for Canvas detection');
+        
+        // Try to open the popup programmatically
+        // Note: This will only work if the user has interacted with the page recently
+        try {
+            await chrome.action.openPopup();
+            console.log('✅ TigerCat popup opened automatically');
+        } catch (error) {
+            // Fallback: Show a notification or badge
+            console.log('🐅 Could not auto-open popup (user interaction required):', error.message);
+            
+            // Set badge to indicate Canvas detection
+            chrome.action.setBadgeText({
+                tabId: tab.id,
+                text: '🎓'
+            });
+            
+            chrome.action.setBadgeBackgroundColor({
+                tabId: tab.id,
+                color: '#FF671D' // Pacific orange
+            });
+            
+            // Update title to indicate Canvas detection
+            chrome.action.setTitle({
+                tabId: tab.id,
+                title: 'TigerCat - Canvas Detected! Click to open AI assistant'
+            });
+        }
+        
+    } catch (error) {
+        console.error('🐅 Error in auto-open logic:', error);
+    }
 }
 
 /**

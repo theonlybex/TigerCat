@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
     const chatMessages = document.getElementById('chat-messages');
+    const settingsBtn = document.getElementById('settings-btn');
     
     // Check Canvas status first
     await checkCanvasStatus();
@@ -16,6 +17,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chatInput.addEventListener('input', handleChatInput);
     chatInput.addEventListener('keypress', handleChatKeypress);
     sendBtn.addEventListener('click', handleSendMessage);
+    settingsBtn.addEventListener('click', handleSettings);
     
     // Focus on input for immediate typing
     chatInput.focus();
@@ -207,6 +209,56 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     /**
+     * Handle settings button click
+     */
+    async function handleSettings() {
+        try {
+            // Get current Canvas API key
+            const { canvasApiKey } = await chrome.storage.local.get(['canvasApiKey']);
+            
+            const apiKey = prompt(
+                '🐅 Canvas API Key Setup\n\n' +
+                'To enable Canvas features:\n\n' +
+                '1. Go to Canvas → Account → Settings\n' +
+                '2. Scroll to "Approved Integrations"\n' +
+                '3. Click "+ New Access Token"\n' +
+                '4. Purpose: "TigerCat Extension"\n' +
+                '5. Copy and paste the token below\n\n' +
+                'Canvas API Token:',
+                canvasApiKey || ''
+            );
+            
+            if (apiKey !== null) { // User didn't cancel
+                if (apiKey.trim()) {
+                    // Basic validation for Canvas tokens
+                    if (apiKey.length > 30) {
+                        await chrome.storage.local.set({ canvasApiKey: apiKey.trim() });
+                        addMessageToChat('ai', '✅ Canvas API key saved! Canvas features are now active.');
+                        
+                        // Update welcome message to show API key is configured
+                        const currentConfig = await chrome.runtime.sendMessage({
+                            action: 'get_canvas_config'
+                        });
+                        
+                        if (currentConfig.success) {
+                            addMessageToChat('ai', `🛡️ Ready for Canvas API calls to ${currentConfig.config.baseUrl}`);
+                        }
+                    } else {
+                        addMessageToChat('ai', '❌ Token seems too short. Please copy the complete token.');
+                    }
+                } else {
+                    // Remove API key
+                    await chrome.storage.local.remove(['canvasApiKey']);
+                    addMessageToChat('ai', '🗑️ Canvas API key removed.');
+                }
+            }
+        } catch (error) {
+            console.error('Error in settings:', error);
+            addMessageToChat('ai', 'Error accessing settings. Please try again.');
+        }
+    }
+    
+    /**
      * Check Canvas configuration status
      */
     async function checkCanvasConfig(detectedCanvasInfo) {
@@ -221,17 +273,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 
                 // Add config info to chat if URL was auto-detected
                 if (config.autoDetected && config.baseUrl) {
-                    const configMessage = `🔗 Canvas URL auto-detected: ${config.baseUrl}`;
+                    let configMessage = `🔗 Canvas URL auto-detected: ${config.baseUrl}`;
                     if (config.institutionName) {
                         configMessage += ` (${config.institutionName})`;
                     }
                     addMessageToChat('ai', configMessage);
                     
                     // Show API key status
-                    if (config.apiKey) {
+                    if (config.apiKeySet) {
                         addMessageToChat('ai', '✅ Canvas API key configured - ready for Canvas features!');
                     } else {
-                        addMessageToChat('ai', '⚠️ Canvas URL detected but no API key set. Canvas features limited.');
+                        addMessageToChat('ai', '⚠️ Canvas URL detected but no API key set. Click ⚙️ to add your Canvas API key.');
                     }
                 }
             }

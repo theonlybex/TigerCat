@@ -3,169 +3,17 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.log('🐅 TigerCat popup loaded!');
     
     // Get references to DOM elements
-    const statusText = document.getElementById('status-text');
-    const activateBtn = document.getElementById('activate-btn');
-    const settingsBtn = document.getElementById('settings-btn');
     const chatInput = document.getElementById('chat-input');
     const sendBtn = document.getElementById('send-btn');
     const chatMessages = document.getElementById('chat-messages');
     
-    // Check if user is currently on a Canvas page
-    await checkCanvasStatus();
-    
     // Set up event listeners
-    activateBtn.addEventListener('click', handleActivate);
-    settingsBtn.addEventListener('click', handleSettings);
     chatInput.addEventListener('input', handleChatInput);
     chatInput.addEventListener('keypress', handleChatKeypress);
     sendBtn.addEventListener('click', handleSendMessage);
     
-    /**
-     * Check if the current active tab is a Canvas page
-     */
-    async function checkCanvasStatus() {
-        try {
-            // Get the current active tab
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            
-            if (!tab) {
-                updateStatus('No active tab', 'not-detected');
-                return;
-            }
-            
-            const url = tab.url;
-            const isCanvas = isCanvasURL(url);
-            
-            if (isCanvas) {
-                updateStatus('Canvas Detected!', 'detected');
-                activateBtn.textContent = 'Open TigerCat on Canvas';
-                activateBtn.disabled = false;
-            } else {
-                updateStatus('Not on Canvas', 'not-detected');
-                activateBtn.textContent = 'Navigate to Canvas first';
-                activateBtn.disabled = true;
-            }
-            
-        } catch (error) {
-            console.error('Error checking Canvas status:', error);
-            updateStatus('Error checking status', 'error');
-        }
-    }
-    
-    /**
-     * Check if a URL is a Canvas LMS URL
-     */
-    function isCanvasURL(url) {
-        if (!url) return false;
-        
-        const canvasPatterns = [
-            /.*\.instructure\.com.*/,
-            /.*\.canvas\..*/,
-            /.*canvas.*/i
-        ];
-        
-        return canvasPatterns.some(pattern => pattern.test(url));
-    }
-    
-    /**
-     * Update the status display
-     */
-    function updateStatus(text, type) {
-        statusText.textContent = text;
-        statusText.className = 'status-value';
-        
-        switch (type) {
-            case 'detected':
-                statusText.classList.add('status-canvas-detected');
-                break;
-            case 'not-detected':
-                statusText.classList.add('status-canvas-not-detected');
-                break;
-            case 'loading':
-                statusText.classList.add('status-loading');
-                break;
-            default:
-                break;
-        }
-    }
-    
-    /**
-     * Handle activate button click
-     */
-    async function handleActivate() {
-        try {
-            updateStatus('Activating...', 'loading');
-            
-            // Get the current active tab
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            
-            if (!tab) {
-                updateStatus('No active tab', 'error');
-                return;
-            }
-            
-            // Send message to content script to activate TigerCat
-            await chrome.tabs.sendMessage(tab.id, {
-                action: 'activate_tigercat',
-                message: 'Hello from TigerCat! 🐅'
-            });
-            
-            updateStatus('TigerCat Activated!', 'detected');
-            
-            // Close popup after activation
-            setTimeout(() => {
-                window.close();
-            }, 1000);
-            
-        } catch (error) {
-            console.error('Error activating TigerCat:', error);
-            updateStatus('Activation failed', 'error');
-        }
-    }
-    
-    /**
-     * Handle settings button click
-     */
-    async function handleSettings() {
-        // Get current Canvas API key
-        const { canvasApiKey } = await chrome.storage.local.get(['canvasApiKey']);
-        
-        // Direct Canvas API key configuration
-        await configureCanvasKey(canvasApiKey);
-    }
-    
-    /**
-     * Configure Canvas API Key
-     */
-    async function configureCanvasKey(currentKey) {
-        const apiKey = prompt(
-            '🐅 Canvas API Key Setup\n\n' +
-            'To enable course analysis:\n\n' +
-            '1. Go to Canvas → Account → Settings\n' +
-            '2. Scroll to "Approved Integrations"\n' +
-            '3. Click "+ New Access Token"\n' +
-            '4. Purpose: "TigerCat Extension"\n' +
-            '5. Copy and paste the token below\n\n' +
-            'Canvas API Token:',
-            currentKey || ''
-        );
-        
-        if (apiKey !== null) { // User didn't cancel
-            if (apiKey.trim()) {
-                // Basic validation for Canvas tokens
-                if (apiKey.length > 30) {
-                    await chrome.storage.local.set({ canvasApiKey: apiKey.trim() });
-                    alert('✅ Canvas API key saved!\n\nCourse features are now active.');
-                } else {
-                    alert('❌ Token seems too short. Please copy the complete token.');
-                }
-            } else {
-                // Remove API key
-                await chrome.storage.local.remove(['canvasApiKey']);
-                alert('Canvas API key removed.');
-            }
-        }
-    }
+    // Focus on input for immediate typing
+    chatInput.focus();
     
     /**
      * Handle chat input changes
@@ -206,8 +54,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Send to background script for AI processing
             const response = await chrome.runtime.sendMessage({
                 action: 'ai_chat_request',
-                query: message,
-                context: [] // We'll add course context later
+                query: message
             });
             
             // Remove typing indicator

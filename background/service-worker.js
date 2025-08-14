@@ -36,13 +36,21 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 });
 
-// Handle messages from popup
+// Handle messages from popup and content scripts
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     console.log('🐅 Background received message:', request);
     
     switch (request.action) {
         case 'ai_chat_request':
             handleAIChatRequest(request, sendResponse);
+            return true;
+            
+        case 'canvas_detected':
+            handleCanvasDetected(request, sender, sendResponse);
+            return true; // Keep message channel open for async response
+            
+        case 'get_canvas_config':
+            handleGetCanvasConfig(request, sendResponse);
             return true;
             
         default:
@@ -186,7 +194,156 @@ Be helpful, accurate, and engaging in your responses.`;
     };
 }
 
+/**
+ * Handle Canvas page detection notification
+ */
+async function handleCanvasDetected(request, sender, sendResponse) {
+    console.log('🐅 Canvas detected on tab:', sender.tab?.id, request.data);
+    
+    const canvasData = request.data;
+    
+    // Store Canvas detection info for this tab
+    if (sender.tab?.id) {
+        await chrome.storage.local.set({
+            [`canvas_${sender.tab.id}`]: {
+                detected: true,
+                info: canvasData,
+                timestamp: new Date().toISOString()
+            }
+        });
+    }
+    
+    // Auto-save Canvas Base URL for API calls if we have a valid one
+    if (canvasData.canvasBaseUrl && canvasData.canvasBaseUrl.startsWith('https://')) {
+        try {
+            // Get current stored Canvas URL
+            const stored = await chrome.storage.local.get(['canvasBaseUrl', 'canvasAutoDetected']);
+            
+            // Only update if:
+            // 1. No URL is currently stored, OR
+            // 2. The stored URL is different from detected URL, OR  
+            // 3. The stored URL was not auto-detected (user preference should override)
+            const shouldUpdate = !stored.canvasBaseUrl || 
+                                stored.canvasBaseUrl !== canvasData.canvasBaseUrl ||
+                                !stored.canvasAutoDetected;
+            
+            if (shouldUpdate) {
+                await chrome.storage.local.set({
+                    canvasBaseUrl: canvasData.canvasBaseUrl,
+                    canvasAutoDetected: true,
+                    canvasInstitutionName: canvasData.institutionName || 'Unknown',
+                    canvasAutoDetectedTime: new Date().toISOString()
+                });
+                
+                console.log('🐅 Auto-saved Canvas Base URL:', canvasData.canvasBaseUrl);
+            } else {
+                console.log('🐅 Canvas URL already configured, not overriding');
+            }
+            
+        } catch (error) {
+            console.error('🐅 Error saving Canvas URL:', error);
+        }
+    }
+    
+    sendResponse({ success: true });
+}
 
+/**
+ * Handle getting Canvas configuration
+ */
+async function handleGetCanvasConfig(request, sendResponse) {
+    try {
+        const stored = await chrome.storage.local.get([
+            'canvasBaseUrl', 
+            'canvasApiKey',
+            'canvasAutoDetected',
+            'canvasInstitutionName',
+            'canvasAutoDetectedTime'
+        ]);
+        
+        sendResponse({
+            success: true,
+            config: {
+                baseUrl: stored.canvasBaseUrl || null,
+                apiKey: stored.canvasApiKey || null,
+                autoDetected: stored.canvasAutoDetected || false,
+                institutionName: stored.canvasInstitutionName || null,
+                lastDetected: stored.canvasAutoDetectedTime || null
+            }
+        });
+        
+    } catch (error) {
+        console.error('🐅 Error getting Canvas config:', error);
+        sendResponse({
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Basic Canvas API function for testing auto-detected URL
+ */
+async function callCanvasAPI(endpoint, apiKey, baseUrl) {
+    if (!baseUrl || !apiKey) {
+        throw new Error('Canvas Base URL and API Key are required');
+    }
+    
+    // Clean up the base URL and endpoint
+    const cleanBaseUrl = baseUrl.replace(/\/$/, ''); // Remove trailing slash
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+    const fullUrl = `${cleanBaseUrl}/api/v1${cleanEndpoint}`;
+    
+    console.log('🔗 Canvas API call:', fullUrl);
+    
+    const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+        }
+    });
+    
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error('🚨 Canvas API Error:', {
+            status: response.status,
+            statusText: response.statusText,
+            error: errorText,
+            url: fullUrl
+        });
+        
+        if (response.status === 401) {
+            throw new Error('Canvas API authentication failed. Please check your API key.');
+        } else if (response.status === 403) {
+            throw new Error('Canvas API access denied. Check your permissions.');
+        } else if (response.status === 404) {
+            throw new Error('Canvas API endpoint not found. Check your Canvas URL.');
+        } else {
+            throw new Error(`Canvas API error: ${response.status} ${response.statusText}`);
+        }
+    }
+    
+    const data = await response.json();
+    return data;
+}
+
+/**
+ * Get configuration
+ */
+function getConfig() {
+    // Use directly loaded config
+    if (TIGERCAT_CONFIG) {
+        return TIGERCAT_CONFIG;
+    }
+    
+    // Default configuration
+    return {
+        OPENAI_MODEL: 'gpt-4o-mini',
+        OPENAI_MAX_TOKENS: 1000,
+        OPENAI_TEMPERATURE: 0.7
+    };
+}
 
 // Keep service worker alive
 chrome.runtime.onSuspend.addListener(() => {

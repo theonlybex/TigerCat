@@ -5,7 +5,12 @@
   "description": "TigerCat AI Assistant - Your helpful AI chat companion",
   
   "permissions": [
+    "activeTab",
     "storage"
+  ],
+  
+  "host_permissions": [
+    "*://*.instructure.com/*"
   ],
   
   "action": {
@@ -14,6 +19,16 @@
   },
   
 
+  
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.instructure.com/*"
+      ],
+      "js": ["content/canvas-detector.js"],
+      "run_at": "document_end"
+    }
+  ],
   
   "background": {
     "service_worker": "background/service-worker.js"

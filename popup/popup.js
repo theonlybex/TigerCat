@@ -58,17 +58,90 @@ document.addEventListener('DOMContentLoaded', async () => {
         const typingMessage = addMessageToChat('ai', 'Thinking...');
         
         try {
-            // Send to background script for AI processing
-            const response = await chrome.runtime.sendMessage({
-                action: 'ai_chat_request',
-                query: message
-            });
+            // Check for specific commands first
+            const lowerMessage = message.toLowerCase();
+            
+            // Check if user is asking to read a PDF or specific file
+            if (lowerMessage.includes('read') && (lowerMessage.includes('pdf') || lowerMessage.includes('file'))) {
+                if (detectedFiles.length > 0) {
+                    // Force reading with context even if it's a PDF
+                    const response = await chrome.runtime.sendMessage({
+                        action: 'ai_chat_with_context',
+                        query: message,
+                        fileIds: detectedFiles
+                    });
+                    
+                    // Remove typing indicator
+                    chatMessages.removeChild(typingMessage);
+                    
+                    if (response.success) {
+                        let responseText = response.response;
+                        
+                        // Add context indicator
+                        if (response.filesProcessed && response.filesProcessed > 0) {
+                            const fileContextNote = `\n\n📁 *Processed ${response.filesProcessed} Canvas file${response.filesProcessed > 1 ? 's' : ''}*`;
+                            if (response.fileContexts && response.fileContexts.length > 0) {
+                                const fileList = response.fileContexts.map(f => `• ${f.filename} (${f.type})`).join('\n');
+                                responseText += `${fileContextNote}:\n${fileList}`;
+                            } else {
+                                responseText += fileContextNote;
+                            }
+                        }
+                        
+                        addMessageToChat('ai', responseText);
+                    } else {
+                        addMessageToChat('ai', `Sorry, I encountered an error reading the files: ${response.error}`);
+                    }
+                    
+                    // Re-enable send button and focus input
+                    sendBtn.disabled = false;
+                    chatInput.focus();
+                    return;
+                } else {
+                    addMessageToChat('ai', 'I don\'t see any files on this Canvas page to read. Make sure you\'re on a page with PDF files or documents, and that you have your Canvas API key configured in settings.');
+                    // Remove typing indicator
+                    chatMessages.removeChild(typingMessage);
+                    sendBtn.disabled = false;
+                    chatInput.focus();
+                    return;
+                }
+            }
+            
+            // Check if we should use Canvas file context
+            let response;
+            if (detectedFiles.length > 0) {
+                // Use context-enhanced chat with Canvas files
+                response = await chrome.runtime.sendMessage({
+                    action: 'ai_chat_with_context',
+                    query: message,
+                    fileIds: detectedFiles
+                });
+            } else {
+                // Use regular AI chat
+                response = await chrome.runtime.sendMessage({
+                    action: 'ai_chat_request',
+                    query: message
+                });
+            }
             
             // Remove typing indicator
             chatMessages.removeChild(typingMessage);
             
             if (response.success) {
-                addMessageToChat('ai', response.response);
+                let responseText = response.response;
+                
+                // Add context indicator if files were processed
+                if (response.filesProcessed && response.filesProcessed > 0) {
+                    const fileContextNote = `\n\n📁 *Analyzed ${response.filesProcessed} Canvas file${response.filesProcessed > 1 ? 's' : ''}*`;
+                    if (response.fileContexts && response.fileContexts.length > 0) {
+                        const fileList = response.fileContexts.map(f => `• ${f.filename} (${f.type})`).join('\n');
+                        responseText += `${fileContextNote}:\n${fileList}`;
+                    } else {
+                        responseText += fileContextNote;
+                    }
+                }
+                
+                addMessageToChat('ai', responseText);
             } else {
                 addMessageToChat('ai', `Sorry, I encountered an error: ${response.error}`);
             }
@@ -124,6 +197,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                     
                     if (response && response.isCanvas) {
                         updateStatus('Canvas Detected!', 'detected', response.canvasInfo);
+                        // Also check Smart Search status
+                        checkSmartSearchStatus(tab.id);
+                        // Check for Canvas files on current page
+                        detectCanvasFiles(tab.id, response.canvasInfo);
                     } else {
                         updateStatus('Canvas URL but not loaded', 'partial');
                     }
@@ -133,12 +210,172 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
             } else {
                 updateStatus('Not on Canvas', 'not-detected');
+                hideSmartSearchStatus();
             }
             
         } catch (error) {
             console.error('Error checking Canvas status:', error);
             updateStatus('Status check failed', 'error');
         }
+    }
+    
+    /**
+     * Check Smart Search status on the current Canvas page
+     */
+    async function checkSmartSearchStatus(tabId) {
+        try {
+            const response = await chrome.tabs.sendMessage(tabId, {
+                action: 'get_smart_search_status'
+            });
+            
+            if (response && response.success) {
+                updateSmartSearchStatus(response.smartSearchEnabled, response.detectionResults);
+            } else {
+                // Hide Smart Search indicator if not available
+                hideSmartSearchStatus();
+            }
+        } catch (error) {
+            console.error('Error checking Smart Search status:', error);
+            hideSmartSearchStatus();
+        }
+    }
+    
+    /**
+     * Update Smart Search status indicator
+     */
+    function updateSmartSearchStatus(enabled, detectionResults) {
+        const smartSearchElement = document.getElementById('smart-search-status');
+        const smartSearchText = document.getElementById('smart-search-text');
+        
+        if (enabled) {
+            smartSearchElement.style.display = 'block';
+            
+            // Update text based on detection type
+            if (detectionResults?.smartSearchApiAvailable) {
+                smartSearchText.textContent = 'Smart Search API Detected!';
+            } else if (detectionResults?.globalSearch) {
+                smartSearchText.textContent = 'Global Search Detected!';
+            } else if (detectionResults?.courseSearch) {
+                smartSearchText.textContent = 'Course Search Detected!';
+            } else {
+                smartSearchText.textContent = 'Smart Search Detected!';
+            }
+            
+            console.log('🔍 Smart Search status updated:', detectionResults);
+        } else {
+            hideSmartSearchStatus();
+        }
+    }
+    
+    /**
+     * Hide Smart Search status indicator
+     */
+    function hideSmartSearchStatus() {
+        const smartSearchElement = document.getElementById('smart-search-status');
+        smartSearchElement.style.display = 'none';
+    }
+    
+    /**
+     * Detect Canvas files on current page
+     */
+    let detectedFiles = [];
+    async function detectCanvasFiles(tabId, canvasInfo) {
+        try {
+            // Extract file IDs from current page URL and DOM
+            const fileIds = await extractFileIdsFromPage(tabId);
+            
+            if (fileIds.length > 0) {
+                console.log('📁 Detected Canvas files on page:', fileIds);
+                detectedFiles = fileIds;
+                
+                // Update welcome message to indicate file context is available
+                const currentWelcome = welcomeMessage.textContent;
+                if (!currentWelcome.includes('files')) {
+                    welcomeMessage.textContent = `${currentWelcome} I can read ${fileIds.length} file${fileIds.length > 1 ? 's' : ''} on this page!`;
+                }
+            } else {
+                detectedFiles = [];
+            }
+        } catch (error) {
+            console.error('Error detecting Canvas files:', error);
+            detectedFiles = [];
+        }
+    }
+    
+    /**
+     * Extract file IDs from current Canvas page
+     */
+    async function extractFileIdsFromPage(tabId) {
+        try {
+            // Inject a content script to extract file information
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tabId },
+                function: extractCanvasFileIds
+            });
+            
+            if (results && results[0] && results[0].result) {
+                return results[0].result;
+            }
+            
+            return [];
+        } catch (error) {
+            console.error('Error extracting file IDs:', error);
+            return [];
+        }
+    }
+    
+    /**
+     * Function to run in content script context to extract file IDs
+     */
+    function extractCanvasFileIds() {
+        const fileIds = [];
+        
+        // Look for file links in various formats
+        const fileSelectors = [
+            'a[href*="/files/"]',
+            'a[href*="/courses/"][href*="/files/"]',
+            '[data-file-id]',
+            '.file-link',
+            '.attachment-link'
+        ];
+        
+        fileSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(element => {
+                let fileId = null;
+                
+                // Extract from data attribute
+                if (element.dataset.fileId) {
+                    fileId = element.dataset.fileId;
+                }
+                // Extract from href
+                else if (element.href) {
+                    const fileMatch = element.href.match(/\/files\/(\d+)/);
+                    if (fileMatch) {
+                        fileId = fileMatch[1];
+                    }
+                }
+                
+                if (fileId && !fileIds.includes(fileId)) {
+                    fileIds.push(fileId);
+                }
+            });
+        });
+        
+        // Also check for file download links
+        const downloadLinks = document.querySelectorAll('a[href*="download"]');
+        downloadLinks.forEach(link => {
+            const fileMatch = link.href.match(/\/files\/(\d+)/);
+            if (fileMatch) {
+                const fileId = fileMatch[1];
+                if (!fileIds.includes(fileId)) {
+                    fileIds.push(fileId);
+                }
+            }
+        });
+        
+        console.log('🔍 Found file IDs on page:', fileIds);
+        return fileIds;
     }
     
     /**

@@ -307,6 +307,27 @@ h1 {
     color: var(--pacific-black);
 }
 
+/* Smart Search status styling */
+.smart-search-status {
+    margin-top: 5px;
+}
+
+.smart-search-status .status-value {
+    background: var(--pacific-navy) !important;
+    color: var(--pacific-white);
+    font-size: 11px;
+    padding: 3px 6px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.smart-search-status .status-value::before {
+    content: "🔍";
+    font-size: 10px;
+}
+
 /* Scrollbar styling for chat messages */
 .chat-messages::-webkit-scrollbar {
     width: 4px;

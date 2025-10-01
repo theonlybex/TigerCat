@@ -65,6 +65,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             handleGetCanvasConfig(request, sendResponse);
             return true;
             
+        case 'get_canvas_file_content':
+            handleGetCanvasFileContent(request, sendResponse);
+            return true;
+            
+        case 'ai_chat_with_context':
+            handleAIChatWithContext(request, sendResponse);
+            return true;
+            
         default:
             sendResponse({ error: 'Unknown action' });
     }
@@ -345,6 +353,259 @@ async function callCanvasAPI(endpoint, apiKey, baseUrl) {
     
     const data = await response.json();
     return data;
+}
+
+/**
+ * Handle Canvas file content retrieval
+ */
+async function handleGetCanvasFileContent(request, sendResponse) {
+    try {
+        console.log('🔍 Getting Canvas file content:', request);
+        
+        const { fileId, courseId } = request;
+        if (!fileId) {
+            sendResponse({
+                success: false,
+                error: 'File ID is required'
+            });
+            return;
+        }
+        
+        // Get Canvas configuration
+        const stored = await chrome.storage.local.get(['canvasBaseUrl', 'canvasApiKey']);
+        
+        if (!stored.canvasBaseUrl || !stored.canvasApiKey) {
+            sendResponse({
+                success: false,
+                error: 'Canvas API configuration missing. Please set Canvas API key in settings.'
+            });
+            return;
+        }
+        
+        // Get file information first
+        const fileInfo = await callCanvasAPI(`/files/${fileId}`, stored.canvasApiKey, stored.canvasBaseUrl);
+        
+        console.log('📄 File info retrieved:', fileInfo);
+        
+        // Check if file is text-based and readable
+        if (!isReadableFileType(fileInfo)) {
+            sendResponse({
+                success: false,
+                error: `File type "${fileInfo.content_type}" is not supported for content reading`,
+                fileInfo: fileInfo
+            });
+            return;
+        }
+        
+        // Get file content
+        const fileContent = await getCanvasFileContent(fileInfo, stored.canvasApiKey, stored.canvasBaseUrl);
+        
+        sendResponse({
+            success: true,
+            fileInfo: fileInfo,
+            content: fileContent,
+            contentLength: fileContent.length,
+            readableType: getReadableFileType(fileInfo)
+        });
+        
+    } catch (error) {
+        console.error('🚨 Error getting Canvas file content:', error);
+        sendResponse({
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Handle AI chat with Canvas file context
+ */
+async function handleAIChatWithContext(request, sendResponse) {
+    try {
+        console.log('🤖 Processing AI chat with Canvas context:', request);
+        
+        const { query, fileIds, courseId } = request;
+        
+        if (!query) {
+            sendResponse({
+                success: false,
+                error: 'Query is required'
+            });
+            return;
+        }
+        
+        let contextData = '';
+        let fileContexts = [];
+        
+        // Get file content if file IDs provided
+        if (fileIds && fileIds.length > 0) {
+            console.log('📁 Retrieving content for files:', fileIds);
+            
+            for (const fileId of fileIds) {
+                try {
+                    const fileResponse = await handleGetCanvasFileContentInternal(fileId, courseId);
+                    if (fileResponse.success) {
+                        fileContexts.push({
+                            filename: fileResponse.fileInfo.filename,
+                            content: fileResponse.content,
+                            type: fileResponse.readableType
+                        });
+                        
+                        contextData += `\n\n--- File: ${fileResponse.fileInfo.filename} ---\n${fileResponse.content}`;
+                    }
+                } catch (error) {
+                    console.error(`🚨 Error reading file ${fileId}:`, error);
+                }
+            }
+        }
+        
+        // Build enhanced prompt with context
+        let enhancedQuery = query;
+        if (contextData) {
+            enhancedQuery = `Context from Canvas files:${contextData}\n\n---\n\nUser Question: ${query}\n\nPlease answer the question using the provided file context when relevant.`;
+        }
+        
+        // Get API key for OpenAI
+        const { openaiApiKey } = await chrome.storage.local.get(['openaiApiKey']);
+        const config = getConfig();
+        const apiKey = openaiApiKey || config.OPENAI_API_KEY;
+        
+        if (!apiKey) {
+            sendResponse({
+                success: false,
+                error: 'OpenAI API key not configured'
+            });
+            return;
+        }
+        
+        // Make AI API call with context
+        const gptResponse = await callOpenAIAPI(enhancedQuery, apiKey);
+        
+        sendResponse({
+            success: true,
+            response: gptResponse.response,
+            filesProcessed: fileContexts.length,
+            fileContexts: fileContexts.map(f => ({ filename: f.filename, type: f.type }))
+        });
+        
+    } catch (error) {
+        console.error('🚨 Error in AI chat with context:', error);
+        sendResponse({
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Internal function to get Canvas file content (for reuse)
+ */
+async function handleGetCanvasFileContentInternal(fileId, courseId) {
+    const stored = await chrome.storage.local.get(['canvasBaseUrl', 'canvasApiKey']);
+    
+    if (!stored.canvasBaseUrl || !stored.canvasApiKey) {
+        throw new Error('Canvas API configuration missing');
+    }
+    
+    const fileInfo = await callCanvasAPI(`/files/${fileId}`, stored.canvasApiKey, stored.canvasBaseUrl);
+    
+    if (!isReadableFileType(fileInfo)) {
+        throw new Error(`File type "${fileInfo.content_type}" is not supported`);
+    }
+    
+    const fileContent = await getCanvasFileContent(fileInfo, stored.canvasApiKey, stored.canvasBaseUrl);
+    
+    return {
+        success: true,
+        fileInfo: fileInfo,
+        content: fileContent,
+        readableType: getReadableFileType(fileInfo)
+    };
+}
+
+/**
+ * Get actual file content from Canvas
+ */
+async function getCanvasFileContent(fileInfo, apiKey, baseUrl) {
+    console.log('📥 Downloading file content:', fileInfo.filename);
+    
+    // Canvas files can be accessed via direct URL or API
+    let downloadUrl = fileInfo.url;
+    
+    // If the URL requires authentication, we need to use the API
+    const response = await fetch(downloadUrl, {
+        headers: {
+            'Authorization': `Bearer ${apiKey}`
+        }
+    });
+    
+    if (!response.ok) {
+        throw new Error(`Failed to download file: ${response.status} ${response.statusText}`);
+    }
+    
+    const content = await response.text();
+    return content;
+}
+
+/**
+ * Check if file type is readable as text
+ */
+function isReadableFileType(fileInfo) {
+    const readableTypes = [
+        'text/plain',
+        'text/html',
+        'text/css',
+        'text/javascript',
+        'text/markdown',
+        'application/json',
+        'application/xml',
+        'text/xml',
+        'application/javascript',
+        'application/x-javascript',
+        'text/x-python',
+        'text/x-java-source',
+        'text/x-c',
+        'text/x-c++',
+        'application/pdf', // We can try to read PDF
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    ];
+    
+    const textExtensions = [
+        '.txt', '.md', '.py', '.js', '.html', '.css', '.json', '.xml', '.csv',
+        '.java', '.c', '.cpp', '.h', '.php', '.rb', '.go', '.rs', '.sql',
+        '.yml', '.yaml', '.ini', '.cfg', '.conf', '.log'
+    ];
+    
+    // Check content type
+    if (readableTypes.includes(fileInfo.content_type)) {
+        return true;
+    }
+    
+    // Check file extension
+    const filename = fileInfo.filename.toLowerCase();
+    return textExtensions.some(ext => filename.endsWith(ext));
+}
+
+/**
+ * Get readable file type description
+ */
+function getReadableFileType(fileInfo) {
+    const filename = fileInfo.filename.toLowerCase();
+    
+    if (filename.endsWith('.py')) return 'Python';
+    if (filename.endsWith('.js')) return 'JavaScript';
+    if (filename.endsWith('.html')) return 'HTML';
+    if (filename.endsWith('.css')) return 'CSS';
+    if (filename.endsWith('.json')) return 'JSON';
+    if (filename.endsWith('.md')) return 'Markdown';
+    if (filename.endsWith('.txt')) return 'Text';
+    if (filename.endsWith('.java')) return 'Java';
+    if (filename.endsWith('.c')) return 'C';
+    if (filename.endsWith('.cpp')) return 'C++';
+    if (filename.endsWith('.sql')) return 'SQL';
+    
+    return fileInfo.content_type || 'Unknown';
 }
 
 /**
